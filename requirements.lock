@@ -8,5 +8,5 @@
 
 -e file:.
 pyaes==1.6.1
-hydrogram==2.0.0
+hydrogram==0.2.0
 pysocks==1.7.1
