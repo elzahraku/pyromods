@@ -1,7 +1,8 @@
 from inspect import iscoroutinefunction
 from typing import Callable, Tuple
+import asyncio
 
-import pyrogram
+import hydrogram as pyrogram  # alias hydrogram -> pyrogram supaya kompatibel
 from pyrogram.filters import Filter
 from pyrogram.types import CallbackQuery
 
@@ -12,9 +13,7 @@ from ..utils import patch_into, should_patch
 
 
 @patch_into(pyrogram.handlers.callback_query_handler.CallbackQueryHandler)
-class CallbackQueryHandler(
-    pyrogram.handlers.callback_query_handler.CallbackQueryHandler
-):
+class CallbackQueryHandler:
     old__init__: Callable
 
     @should_patch()
@@ -36,7 +35,7 @@ class CallbackQueryHandler(
                 query.message, "id", getattr(query.message, "message_id", None)
             )
 
-            if query.message.chat:
+            if getattr(query.message, "chat", None):
                 chat_id = [query.message.chat.id, query.message.chat.username]
 
         return Identifier(
@@ -64,7 +63,8 @@ class CallbackQueryHandler(
                 if iscoroutinefunction(filters.__call__):
                     listener_does_match = await filters(client, query)
                 else:
-                    listener_does_match = await client.loop.run_in_executor(
+                    loop_for_exec = getattr(client, "loop", asyncio.get_event_loop())
+                    listener_does_match = await loop_for_exec.run_in_executor(
                         None, filters, client, query
                     )
             else:
@@ -82,7 +82,8 @@ class CallbackQueryHandler(
             if iscoroutinefunction(self.filters.__call__):
                 handler_does_match = await self.filters(client, query)
             else:
-                handler_does_match = await client.loop.run_in_executor(
+                loop_for_exec = getattr(client, "loop", asyncio.get_event_loop())
+                handler_does_match = await loop_for_exec.run_in_executor(
                     None, self.filters, client, query
                 )
         else:
@@ -137,7 +138,14 @@ class CallbackQueryHandler(
                 if iscoroutinefunction(listener.callback):
                     await listener.callback(client, query, *args)
                 else:
-                    listener.callback(client, query, *args)
+                    # run non-async callback in executor to avoid blocking if it's heavy
+                    if iscoroutinefunction(listener.callback):
+                        await listener.callback(client, query, *args)
+                    else:
+                        loop_for_exec = getattr(client, "loop", asyncio.get_event_loop())
+                        await loop_for_exec.run_in_executor(
+                            None, listener.callback, client, query, *args
+                        )
 
                 raise pyrogram.StopPropagation
             else:
