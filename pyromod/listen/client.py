@@ -2,7 +2,8 @@ import asyncio
 from inspect import iscoroutinefunction
 from typing import Optional, Callable, Dict, List, Union
 
-import pyrogram
+# pakai hydrogram, tapi alias sebagai `pyrogram` agar sisa kode tidak perlu diubah
+import hydrogram as pyrogram
 from pyrogram.filters import Filter
 
 from ..config import config
@@ -16,8 +17,9 @@ if not config.disable_startup_logs:
     )
 
 
+# patch ke hydrogram.client.Client (pyrogram alias -> hydrogram)
 @patch_into(pyrogram.client.Client)
-class Client(pyrogram.client.Client.on_callback_query()):
+class Client:
     listeners: Dict[ListenerTypes, List[Listener]]
     old__init__: Callable
 
@@ -67,7 +69,9 @@ class Client(pyrogram.client.Client.on_callback_query()):
                 if iscoroutinefunction(config.timeout_handler.__call__):
                     await config.timeout_handler(pattern, listener, timeout)
                 else:
-                    await self.loop.run_in_executor(
+                    # use self.loop if available, fallback to default loop
+                    loop_for_exec = getattr(self, "loop", loop)
+                    await loop_for_exec.run_in_executor(
                         None, config.timeout_handler, pattern, listener, timeout
                     )
             elif config.throw_exceptions:
@@ -200,7 +204,8 @@ class Client(pyrogram.client.Client.on_callback_query()):
             if iscoroutinefunction(config.stopped_handler.__call__):
                 await config.stopped_handler(None, listener)
             else:
-                await self.loop.run_in_executor(
+                loop_for_exec = getattr(self, "loop", asyncio.get_event_loop())
+                await loop_for_exec.run_in_executor(
                     None, config.stopped_handler, None, listener
                 )
         elif config.throw_exceptions:
