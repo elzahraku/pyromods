@@ -1,11 +1,12 @@
-import pyrogram
+# patch_chat.py
+import hydrogram as pyrogram
 
 from .client import Client
 from ..utils import patch_into, should_patch
 
 
 @patch_into(pyrogram.types.user_and_chats.chat.Chat)
-class Chat(pyrogram.types.user_and_chats.chat.Chat):
+class Chat:
     _client: Client
 
     @should_patch()
