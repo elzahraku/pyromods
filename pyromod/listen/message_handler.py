@@ -1,9 +1,10 @@
 from inspect import iscoroutinefunction
 from typing import Callable
+import asyncio
 
-import pyrogram
-from pyrogram.filters import Filter
-from pyrogram.types import Message
+import hydrogram as pyrogram
+from hydrogram.filters import Filter
+from hydrogram.types import Message
 
 from .client import Client
 from ..types import ListenerTypes, Identifier
@@ -11,7 +12,7 @@ from ..utils import should_patch, patch_into
 
 
 @patch_into(pyrogram.handlers.message_handler.MessageHandler)
-class MessageHandler(pyrogram.handlers.message_handler.MessageHandler):
+class MessageHandler:
     filters: Filter
     old__init__: Callable
 
@@ -22,15 +23,18 @@ class MessageHandler(pyrogram.handlers.message_handler.MessageHandler):
 
     @should_patch()
     async def check_if_has_matching_listener(self, client: Client, message: Message):
-        from_user = message.from_user
+        from_user = getattr(message, "from_user", None)
         from_user_id = from_user.id if from_user else None
         from_user_username = from_user.username if from_user else None
 
         message_id = getattr(message, "id", getattr(message, "message_id", None))
 
+        chat = getattr(message, "chat", None)
+        chat_id = [getattr(chat, "id", None), getattr(chat, "username", None)]
+
         data = Identifier(
             message_id=message_id,
-            chat_id=[message.chat.id, message.chat.username],
+            chat_id=chat_id,
             from_user_id=[from_user_id, from_user_username],
         )
 
@@ -44,7 +48,8 @@ class MessageHandler(pyrogram.handlers.message_handler.MessageHandler):
                 if iscoroutinefunction(filters.__call__):
                     listener_does_match = await filters(client, message)
                 else:
-                    listener_does_match = await client.loop.run_in_executor(
+                    loop_for_exec = getattr(client, "loop", asyncio.get_event_loop())
+                    listener_does_match = await loop_for_exec.run_in_executor(
                         None, filters, client, message
                     )
             else:
@@ -62,7 +67,8 @@ class MessageHandler(pyrogram.handlers.message_handler.MessageHandler):
             if iscoroutinefunction(self.filters.__call__):
                 handler_does_match = await self.filters(client, message)
             else:
-                handler_does_match = await client.loop.run_in_executor(
+                loop_for_exec = getattr(client, "loop", asyncio.get_event_loop())
+                handler_does_match = await loop_for_exec.run_in_executor(
                     None, self.filters, client, message
                 )
         else:
@@ -89,7 +95,11 @@ class MessageHandler(pyrogram.handlers.message_handler.MessageHandler):
                 if iscoroutinefunction(listener.callback):
                     await listener.callback(client, message, *args)
                 else:
-                    listener.callback(client, message, *args)
+                    # run possibly-blocking callback in executor to avoid blocking loop
+                    loop_for_exec = getattr(client, "loop", asyncio.get_event_loop())
+                    await loop_for_exec.run_in_executor(
+                        None, listener.callback, client, message, *args
+                    )
 
                 raise pyrogram.StopPropagation
             else:
